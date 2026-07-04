@@ -3,6 +3,13 @@ import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { prisma } from '@/lib/db'
+import { appUrl } from '@/lib/utils'
+
+// Basis-URL fuer Auth-Redirects setzen, falls AUTH_URL fehlt. Ohne das baut
+// Auth.js hinter dem Proxy Redirects auf localhost:3000.
+if (!process.env.AUTH_URL) {
+  process.env.AUTH_URL = appUrl('/api/auth')
+}
 
 // Fallback, falls AUTH_SECRET nicht gesetzt ist: stabiles Secret aus der
 // DATABASE_URL ableiten (verlaesst den Server nie). Fuer Produktion trotzdem

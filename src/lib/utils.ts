@@ -28,7 +28,13 @@ export function slugify(input: string): string {
     .slice(0, 48)
 }
 
+// Oeffentliche Basis-URL fuer Kurzlinks, QR-Codes, E-Mail- und Opt-out-Links.
+// APP_URL hat Vorrang; ohne APP_URL gilt in Produktion die feste Domain.
+const PRODUCTION_URL = 'https://google-qr.domowets.de'
+
 export function appUrl(path = ''): string {
-  const base = process.env.APP_URL?.replace(/\/$/, '') ?? 'http://localhost:3000'
+  const base =
+    process.env.APP_URL?.replace(/\/$/, '') ??
+    (process.env.NODE_ENV === 'production' ? PRODUCTION_URL : 'http://localhost:3000')
   return `${base}${path}`
 }
