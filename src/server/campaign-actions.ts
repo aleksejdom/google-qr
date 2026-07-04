@@ -76,7 +76,18 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       requests: { none: { campaignId } },
     },
   })
-  if (contacts.length === 0) {
+
+  // Fehlgeschlagene/haengende Anfragen dieser Kampagne erneut versuchen
+  const retryRequests = await prisma.reviewRequest.findMany({
+    where: {
+      campaignId,
+      status: { in: ['FAILED', 'PENDING'] },
+      contact: { optedOutAt: null, email: { not: null } },
+    },
+    include: { contact: true },
+  })
+
+  if (contacts.length === 0 && retryRequests.length === 0) {
     // Genau erklaeren, warum niemand uebrig bleibt
     const [total, withEmail, optedOut, alreadySent] = await Promise.all([
       prisma.contact.count({ where: { orgId: session.orgId } }),
@@ -98,6 +109,41 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
 
   let sent = 0
   let failed = 0
+  let lastError: string | undefined
+
+  type SendTarget = {
+    requestId: string
+    token: string
+    contact: { firstName: string; lastName: string | null; email: string | null; optOutToken: string }
+  }
+
+  async function deliver(target: SendTarget) {
+    const vars = {
+      vorname: target.contact.firstName,
+      nachname: target.contact.lastName ?? '',
+      firma: campaign!.org.name,
+      standort: location!.name,
+      bewertungslink: appUrl(`/f/${location!.slug}?t=${target.token}`),
+      abmeldelink: appUrl(`/opt-out/${target.contact.optOutToken}`),
+    }
+    const result = await sendMail({
+      orgId: session.orgId,
+      to: target.contact.email!,
+      subject: renderTemplate(campaign!.emailSubject ?? DEFAULT_EMAIL_SUBJECT, vars),
+      text: renderTemplate(campaign!.emailBody ?? DEFAULT_EMAIL_BODY, vars),
+    })
+    await prisma.reviewRequest.update({
+      where: { id: target.requestId },
+      data: result.ok ? { status: 'SENT', sentAt: new Date() } : { status: 'FAILED' },
+    })
+    if (result.ok) sent++
+    else {
+      failed++
+      lastError = result.error
+    }
+  }
+
+  // Neue Kontakte: Anfrage anlegen und versenden
   for (const contact of contacts) {
     const request = await prisma.reviewRequest.create({
       data: {
@@ -108,29 +154,12 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
         channel: 'EMAIL',
       },
     })
+    await deliver({ requestId: request.id, token: request.token, contact })
+  }
 
-    const vars = {
-      vorname: contact.firstName,
-      nachname: contact.lastName ?? '',
-      firma: campaign.org.name,
-      standort: location.name,
-      bewertungslink: appUrl(`/f/${location.slug}?t=${request.token}`),
-      abmeldelink: appUrl(`/opt-out/${contact.optOutToken}`),
-    }
-
-    const result = await sendMail({
-      orgId: session.orgId,
-      to: contact.email!,
-      subject: renderTemplate(campaign.emailSubject ?? DEFAULT_EMAIL_SUBJECT, vars),
-      text: renderTemplate(campaign.emailBody ?? DEFAULT_EMAIL_BODY, vars),
-    })
-
-    await prisma.reviewRequest.update({
-      where: { id: request.id },
-      data: result.ok ? { status: 'SENT', sentAt: new Date() } : { status: 'FAILED' },
-    })
-    if (result.ok) sent++
-    else failed++
+  // Fehlgeschlagene Anfragen erneut versuchen
+  for (const request of retryRequests) {
+    await deliver({ requestId: request.id, token: request.token, contact: request.contact })
   }
 
   if (campaign.status === 'DRAFT') {
@@ -147,6 +176,8 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
   revalidatePath(`/campaigns/${campaignId}`)
   revalidatePath('/campaigns')
   return failed > 0
-    ? { error: `${sent} versendet, ${failed} fehlgeschlagen (SMTP pruefen)` }
+    ? {
+        error: `${sent} versendet, ${failed} fehlgeschlagen${lastError ? ` – ${lastError}` : ''}. SMTP unter Einstellungen pruefen.`,
+      }
     : { success: `${sent} Bewertungsanfragen versendet` }
 }

@@ -21,7 +21,10 @@ export default async function CampaignsPage() {
   const [campaigns, locations] = await Promise.all([
     prisma.campaign.findMany({
       where: { orgId: session.orgId },
-      include: { _count: { select: { requests: true } } },
+      include: {
+        _count: { select: { requests: true } },
+        requests: { select: { status: true } },
+      },
       orderBy: { createdAt: 'desc' },
     }),
     prisma.location.findMany({ where: { orgId: session.orgId }, orderBy: { name: 'asc' } }),
@@ -48,6 +51,10 @@ export default async function CampaignsPage() {
           )}
           {campaigns.map((campaign) => {
             const status = statusLabels[campaign.status] ?? statusLabels.DRAFT
+            const delivered = campaign.requests.filter((r) =>
+              ['SENT', 'REMINDED', 'COMPLETED'].includes(r.status)
+            ).length
+            const failedCount = campaign.requests.filter((r) => r.status === 'FAILED').length
             return (
               <Card key={campaign.id}>
                 <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
@@ -57,9 +64,13 @@ export default async function CampaignsPage() {
                       {format(campaign.createdAt, 'dd.MM.yyyy')} · {campaign._count.requests}{' '}
                       Anfragen
                     </p>
-                    <div className="mt-2 flex gap-2">
+                    <div className="mt-2 flex flex-wrap gap-2">
                       <Badge variant={status.variant}>{status.label}</Badge>
                       <Badge variant="outline">{campaign.channel}</Badge>
+                      {delivered > 0 && <Badge variant="success">{delivered} zugestellt</Badge>}
+                      {failedCount > 0 && (
+                        <Badge variant="destructive">{failedCount} fehlgeschlagen</Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
