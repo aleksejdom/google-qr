@@ -1,11 +1,23 @@
 import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import { prisma } from '@/lib/db'
+
+// Fallback, falls AUTH_SECRET nicht gesetzt ist: stabiles Secret aus der
+// DATABASE_URL ableiten (verlaesst den Server nie). Fuer Produktion trotzdem
+// ein eigenes AUTH_SECRET setzen.
+const authSecret =
+  process.env.AUTH_SECRET ??
+  crypto
+    .createHash('sha256')
+    .update(`reviewpilot-auth:${process.env.DATABASE_URL ?? 'dev'}`)
+    .digest('base64')
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   // Selbst gehostet hinter Reverse-Proxy (Coolify/Traefik): Host-Header vertrauen
   trustHost: true,
+  secret: authSecret,
   session: { strategy: 'jwt' },
   pages: { signIn: '/login' },
   providers: [
