@@ -32,6 +32,13 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# generierter Prisma-Client (wird via postinstall/build erzeugt)
+/src/generated/
+
+# lokaler Dateispeicher (MVP-Storage)
+/storage/
 
 # vercel
 .vercel

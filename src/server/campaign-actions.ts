@@ -1,0 +1,134 @@
+'use server'
+
+import { z } from 'zod'
+import { revalidatePath } from 'next/cache'
+import { prisma } from '@/lib/db'
+import { requireSession } from '@/lib/session'
+import { logAudit } from '@/lib/audit'
+import { sendMail, renderTemplate } from '@/lib/mailer'
+import { appUrl } from '@/lib/utils'
+import type { ActionState } from '@/server/auth-actions'
+import { DEFAULT_EMAIL_SUBJECT, DEFAULT_EMAIL_BODY } from '@/server/templates'
+
+const campaignSchema = z.object({
+  name: z.string().min(2, 'Name ist zu kurz'),
+  locationId: z.string().optional(),
+  channel: z.enum(['EMAIL', 'QR', 'SMS_TEMPLATE', 'WHATSAPP_LINK']),
+  emailSubject: z.string().optional(),
+  emailBody: z.string().optional(),
+})
+
+export async function createCampaign(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await requireSession()
+  const parsed = campaignSchema.safeParse({
+    name: formData.get('name'),
+    locationId: formData.get('locationId') || undefined,
+    channel: formData.get('channel') || 'EMAIL',
+    emailSubject: formData.get('emailSubject') || DEFAULT_EMAIL_SUBJECT,
+    emailBody: formData.get('emailBody') || DEFAULT_EMAIL_BODY,
+  })
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message }
+
+  const campaign = await prisma.campaign.create({
+    data: { ...parsed.data, locationId: parsed.data.locationId || null, orgId: session.orgId },
+  })
+  await logAudit({
+    orgId: session.orgId,
+    userId: session.userId,
+    action: 'campaign.created',
+    entity: 'Campaign',
+    entityId: campaign.id,
+  })
+  revalidatePath('/campaigns')
+  return { success: 'Kampagne angelegt' }
+}
+
+export async function deleteCampaign(campaignId: string): Promise<void> {
+  const session = await requireSession()
+  await prisma.campaign.deleteMany({ where: { id: campaignId, orgId: session.orgId } })
+  revalidatePath('/campaigns')
+}
+
+/**
+ * E-Mail-Kampagne versenden: erstellt fuer jeden Kontakt mit E-Mail (ohne Opt-out,
+ * ohne bereits vorhandene Anfrage in dieser Kampagne) eine ReviewRequest und
+ * verschickt die E-Mail ueber SMTP.
+ */
+export async function sendCampaign(campaignId: string): Promise<ActionState> {
+  const session = await requireSession()
+  const campaign = await prisma.campaign.findFirst({
+    where: { id: campaignId, orgId: session.orgId },
+    include: { org: true },
+  })
+  if (!campaign) return { error: 'Kampagne nicht gefunden' }
+  if (campaign.channel !== 'EMAIL') return { error: 'Nur E-Mail-Kampagnen koennen versendet werden' }
+
+  const location = campaign.locationId
+    ? await prisma.location.findUnique({ where: { id: campaign.locationId } })
+    : await prisma.location.findFirst({ where: { orgId: session.orgId } })
+  if (!location) return { error: 'Bitte zuerst einen Standort anlegen' }
+
+  const contacts = await prisma.contact.findMany({
+    where: {
+      orgId: session.orgId,
+      optedOutAt: null,
+      email: { not: null },
+      requests: { none: { campaignId } },
+    },
+  })
+  if (contacts.length === 0) return { error: 'Keine passenden Kontakte (mit E-Mail, ohne Opt-out) gefunden' }
+
+  let sent = 0
+  let failed = 0
+  for (const contact of contacts) {
+    const request = await prisma.reviewRequest.create({
+      data: {
+        orgId: session.orgId,
+        campaignId,
+        contactId: contact.id,
+        locationId: location.id,
+        channel: 'EMAIL',
+      },
+    })
+
+    const vars = {
+      vorname: contact.firstName,
+      nachname: contact.lastName ?? '',
+      firma: campaign.org.name,
+      standort: location.name,
+      bewertungslink: appUrl(`/f/${location.slug}?t=${request.token}`),
+      abmeldelink: appUrl(`/opt-out/${contact.optOutToken}`),
+    }
+
+    const result = await sendMail({
+      orgId: session.orgId,
+      to: contact.email!,
+      subject: renderTemplate(campaign.emailSubject ?? DEFAULT_EMAIL_SUBJECT, vars),
+      text: renderTemplate(campaign.emailBody ?? DEFAULT_EMAIL_BODY, vars),
+    })
+
+    await prisma.reviewRequest.update({
+      where: { id: request.id },
+      data: result.ok ? { status: 'SENT', sentAt: new Date() } : { status: 'FAILED' },
+    })
+    if (result.ok) sent++
+    else failed++
+  }
+
+  if (campaign.status === 'DRAFT') {
+    await prisma.campaign.update({ where: { id: campaignId }, data: { status: 'ACTIVE' } })
+  }
+  await logAudit({
+    orgId: session.orgId,
+    userId: session.userId,
+    action: 'campaign.sent',
+    entity: 'Campaign',
+    entityId: campaignId,
+    meta: { sent, failed },
+  })
+  revalidatePath(`/campaigns/${campaignId}`)
+  revalidatePath('/campaigns')
+  return failed > 0
+    ? { error: `${sent} versendet, ${failed} fehlgeschlagen (SMTP pruefen)` }
+    : { success: `${sent} Bewertungsanfragen versendet` }
+}

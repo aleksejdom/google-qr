@@ -1,0 +1,243 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum Platform {
+  GOOGLE
+  FACEBOOK
+  TRUSTPILOT
+  CUSTOM
+}
+
+enum Channel {
+  EMAIL
+  QR
+  SMS_TEMPLATE
+  WHATSAPP_LINK
+}
+
+enum RequestStatus {
+  PENDING
+  SENT
+  REMINDED
+  COMPLETED
+  FAILED
+  OPTED_OUT
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+enum ScanSource {
+  QR
+  LINK
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  name         String
+  createdAt    DateTime     @default(now())
+  memberships  Membership[]
+  tasks        Task[]
+}
+
+model Organization {
+  id          String         @id @default(cuid())
+  name        String
+  slug        String         @unique
+  // SMTP-Einstellungen pro Organisation (Fallback: ENV)
+  smtpHost    String?
+  smtpPort    Int?
+  smtpUser    String?
+  smtpPass    String?
+  smtpFrom    String?
+  createdAt   DateTime       @default(now())
+  memberships Membership[]
+  locations   Location[]
+  contacts    Contact[]
+  campaigns   Campaign[]
+  requests    ReviewRequest[]
+  recallRules RecallRule[]
+  feedback    FeedbackEntry[]
+  tasks       Task[]
+  auditLogs   AuditLog[]
+}
+
+model Membership {
+  id     String @id @default(cuid())
+  userId String
+  orgId  String
+  role   Role   @default(MEMBER)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
+model Location {
+  id                String          @id @default(cuid())
+  orgId             String
+  name              String
+  slug              String          @unique
+  address           String?
+  // Ab dieser Sternezahl wird zur externen Bewertung weitergeleitet,
+  // darunter landet das Feedback im internen Formular.
+  feedbackThreshold Int             @default(4)
+  createdAt         DateTime        @default(now())
+  org               Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reviewLinks       ReviewLink[]
+  feedback          FeedbackEntry[]
+  requests          ReviewRequest[]
+}
+
+model ReviewLink {
+  id         String      @id @default(cuid())
+  locationId String
+  platform   Platform    @default(GOOGLE)
+  label      String
+  targetUrl  String
+  code       String      @unique
+  createdAt  DateTime    @default(now())
+  location   Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  scans      ScanEvent[]
+}
+
+// Anonymes Tracking: keine personenbezogenen Daten, nur Zeitpunkt und Quelle
+model ScanEvent {
+  id           String     @id @default(cuid())
+  reviewLinkId String
+  source       ScanSource @default(LINK)
+  createdAt    DateTime   @default(now())
+  reviewLink   ReviewLink @relation(fields: [reviewLinkId], references: [id], onDelete: Cascade)
+
+  @@index([reviewLinkId, createdAt])
+}
+
+model Contact {
+  id          String          @id @default(cuid())
+  orgId       String
+  firstName   String
+  lastName    String?
+  email       String?
+  phone       String?
+  optOutToken String          @unique @default(cuid())
+  optedOutAt  DateTime?
+  createdAt   DateTime        @default(now())
+  org         Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requests    ReviewRequest[]
+
+  @@unique([orgId, email])
+}
+
+model Campaign {
+  id           String          @id @default(cuid())
+  orgId        String
+  locationId   String?
+  name         String
+  channel      Channel         @default(EMAIL)
+  status       CampaignStatus  @default(DRAFT)
+  emailSubject String?
+  emailBody    String?
+  createdAt    DateTime        @default(now())
+  org          Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requests     ReviewRequest[]
+}
+
+model ReviewRequest {
+  id            String         @id @default(cuid())
+  orgId         String
+  campaignId    String?
+  contactId     String
+  locationId    String?
+  channel       Channel        @default(EMAIL)
+  status        RequestStatus  @default(PENDING)
+  token         String         @unique @default(cuid())
+  sentAt        DateTime?
+  remindedAt    DateTime?
+  reminderCount Int            @default(0)
+  createdAt     DateTime       @default(now())
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  campaign      Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contact       Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  location      Location?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  feedback      FeedbackEntry?
+
+  @@index([orgId, status])
+}
+
+model RecallRule {
+  id           String       @id @default(cuid())
+  orgId        String
+  name         String
+  daysAfter    Int          @default(3)
+  maxReminders Int          @default(1)
+  active       Boolean      @default(true)
+  org          Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model FeedbackEntry {
+  id           String        @id @default(cuid())
+  orgId        String
+  locationId   String?
+  requestId    String?       @unique
+  rating       Int
+  comment      String?
+  contactEmail String?
+  createdAt    DateTime      @default(now())
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  location     Location?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  request      ReviewRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  task         Task?
+}
+
+model Task {
+  id           String        @id @default(cuid())
+  orgId        String
+  title        String
+  description  String?
+  status       TaskStatus    @default(OPEN)
+  feedbackId   String?       @unique
+  assignedToId String?
+  dueAt        DateTime?
+  createdAt    DateTime      @default(now())
+  org          Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  feedback     FeedbackEntry? @relation(fields: [feedbackId], references: [id], onDelete: SetNull)
+  assignedTo   User?         @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+}
+
+model AuditLog {
+  id        String        @id @default(cuid())
+  orgId     String?
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  meta      Json?
+  createdAt DateTime      @default(now())
+  org       Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, createdAt])
+}
