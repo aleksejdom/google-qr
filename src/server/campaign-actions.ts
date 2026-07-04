@@ -76,7 +76,25 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       requests: { none: { campaignId } },
     },
   })
-  if (contacts.length === 0) return { error: 'Keine passenden Kontakte (mit E-Mail, ohne Opt-out) gefunden' }
+  if (contacts.length === 0) {
+    // Genau erklaeren, warum niemand uebrig bleibt
+    const [total, withEmail, optedOut, alreadySent] = await Promise.all([
+      prisma.contact.count({ where: { orgId: session.orgId } }),
+      prisma.contact.count({ where: { orgId: session.orgId, email: { not: null } } }),
+      prisma.contact.count({ where: { orgId: session.orgId, optedOutAt: { not: null } } }),
+      prisma.contact.count({
+        where: { orgId: session.orgId, requests: { some: { campaignId } } },
+      }),
+    ])
+    if (total === 0) return { error: 'Noch keine Kontakte vorhanden – zuerst unter „Kontakte“ anlegen oder per CSV importieren.' }
+    if (withEmail === 0) return { error: `${total} Kontakt(e) vorhanden, aber keiner hat eine E-Mail-Adresse.` }
+    if (alreadySent > 0)
+      return {
+        error: `Alle passenden Kontakte (${alreadySent}) haben aus dieser Kampagne bereits eine Anfrage erhalten. Neue Kontakte anlegen oder eine neue Kampagne erstellen.`,
+      }
+    if (optedOut > 0) return { error: `Alle Kontakte mit E-Mail haben sich abgemeldet (Opt-out: ${optedOut}).` }
+    return { error: 'Keine passenden Kontakte (mit E-Mail, ohne Opt-out) gefunden.' }
+  }
 
   let sent = 0
   let failed = 0
