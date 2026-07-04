@@ -6,9 +6,10 @@ import { readFile } from '@/lib/storage'
 import { appUrl } from '@/lib/utils'
 
 /**
- * QR-Code als PNG: /api/qr/{code}?size=600&logo=1
+ * QR-Code als PNG: /api/qr/{code}?size=600&logo=1&direct=1
  * Der QR-Code zeigt auf den Kurzlink /r/{code}?src=qr (anonymes Tracking).
- * Ist ein Organisations-Logo hochgeladen, wird es mittig eingebettet.
+ * Mit direct=1 fuehrt der Scan direkt zur externen Bewertungsseite statt
+ * zum Funnel. Ist ein Organisations-Logo hochgeladen, wird es eingebettet.
  */
 export async function GET(
   request: NextRequest,
@@ -23,7 +24,8 @@ export async function GET(
 
   const size = Math.min(Number(request.nextUrl.searchParams.get('size') ?? 600), 2000)
   const withLogo = request.nextUrl.searchParams.get('logo') !== '0'
-  const target = appUrl(`/r/${code}?src=qr`)
+  const direct = request.nextUrl.searchParams.get('direct') === '1'
+  const target = appUrl(`/r/${code}?src=qr${direct ? '&direct=1' : ''}`)
 
   let png = await QRCode.toBuffer(target, {
     type: 'png',

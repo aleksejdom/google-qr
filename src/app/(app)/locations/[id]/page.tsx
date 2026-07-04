@@ -56,44 +56,78 @@ export default async function LocationDetailPage({
           )}
           {location.reviewLinks.map((link) => {
             const shortUrl = appUrl(`/r/${link.code}`)
+            const directUrl = appUrl(`/r/${link.code}?direct=1`)
             return (
               <Card key={link.id}>
-                <CardContent className="flex flex-wrap items-start justify-between gap-4 p-5">
-                  <div className="flex items-start gap-4">
-                    {/* QR-Vorschau direkt aus der API */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`/api/qr/${link.code}?size=200`}
-                      alt={`QR-Code ${link.label}`}
-                      className="h-24 w-24 rounded-md border border-zinc-200 dark:border-zinc-700"
-                    />
-                    <div className="min-w-0">
-                      <p className="font-medium">{link.label}</p>
-                      <p className="max-w-xs truncate text-xs text-zinc-500">{link.targetUrl}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">{link.platform}</Badge>
-                        <Badge variant="outline">{link._count.scans} Scans</Badge>
+                <CardContent className="space-y-4 p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                      {/* QR-Vorschau direkt aus der API */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/qr/${link.code}?size=200`}
+                        alt={`QR-Code ${link.label}`}
+                        className="h-24 w-24 rounded-md border border-zinc-200 dark:border-zinc-700"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium">{link.label}</p>
+                        <p className="max-w-xs truncate text-xs text-zinc-500">{link.targetUrl}</p>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">{link.platform}</Badge>
+                          <Badge variant="outline">{link._count.scans} Scans</Badge>
+                        </div>
                       </div>
-                      <p className="mt-2 font-mono text-xs text-zinc-500">{shortUrl}</p>
                     </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <CopyButton text={shortUrl} label="Kurzlink" />
-                    <a href={`/api/qr/${link.code}?size=1000`} download={`qr-${link.code}.png`}>
-                      <Button variant="outline" size="sm">
-                        <Download className="h-4 w-4" /> QR PNG
-                      </Button>
-                    </a>
-                    <a href={`/api/poster/${link.code}`} target="_blank">
-                      <Button variant="outline" size="sm">
-                        <FileText className="h-4 w-4" /> Poster PDF
-                      </Button>
-                    </a>
                     <form action={deleteReviewLink.bind(null, link.id)}>
                       <Button variant="ghost" size="icon" aria-label="Link loeschen">
                         <Trash2 className="h-4 w-4 text-zinc-400" />
                       </Button>
                     </form>
+                  </div>
+
+                  {/* Variante 1: Funnel (interne Feedback-Weiche) */}
+                  <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                    <p className="text-xs font-medium text-zinc-500">
+                      Funnel-Link · Kunde waehlt erst Sterne, bei negativer Bewertung internes Feedback
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs">{shortUrl}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <CopyButton text={shortUrl} label="Kurzlink" />
+                      <a href={`/api/qr/${link.code}?size=1000`} download={`qr-funnel-${link.code}.png`}>
+                        <Button variant="outline" size="sm">
+                          <Download className="h-4 w-4" /> QR PNG
+                        </Button>
+                      </a>
+                      <a href={`/api/poster/${link.code}`} target="_blank">
+                        <Button variant="outline" size="sm">
+                          <FileText className="h-4 w-4" /> Poster PDF
+                        </Button>
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* Variante 2: Direktlink zur externen Bewertungsseite */}
+                  <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
+                    <p className="text-xs font-medium text-zinc-500">
+                      Direkt-Link · fuehrt sofort zu {link.label} (mit Scan-Tracking, ohne Funnel)
+                    </p>
+                    <p className="mt-1 break-all font-mono text-xs">{directUrl}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <CopyButton text={directUrl} label="Kurzlink" />
+                      <a
+                        href={`/api/qr/${link.code}?size=1000&direct=1`}
+                        download={`qr-direkt-${link.code}.png`}
+                      >
+                        <Button variant="outline" size="sm">
+                          <Download className="h-4 w-4" /> QR PNG
+                        </Button>
+                      </a>
+                      <a href={`/api/poster/${link.code}?direct=1`} target="_blank">
+                        <Button variant="outline" size="sm">
+                          <FileText className="h-4 w-4" /> Poster PDF
+                        </Button>
+                      </a>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

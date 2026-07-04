@@ -4,9 +4,9 @@ import QRCode from 'qrcode'
 import { prisma } from '@/lib/db'
 import { appUrl } from '@/lib/utils'
 
-/** A4-Poster mit QR-Code fuer den Aushang: /api/poster/{code} */
+/** A4-Poster mit QR-Code fuer den Aushang: /api/poster/{code}?direct=1 */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ code: string }> }
 ) {
   const { code } = await params
@@ -16,7 +16,8 @@ export async function GET(
   })
   if (!link) return new NextResponse('Nicht gefunden', { status: 404 })
 
-  const qrPng = await QRCode.toBuffer(appUrl(`/r/${code}?src=qr`), {
+  const direct = new URL(request.url).searchParams.get('direct') === '1'
+  const qrPng = await QRCode.toBuffer(appUrl(`/r/${code}?src=qr${direct ? '&direct=1' : ''}`), {
     type: 'png',
     width: 900,
     margin: 1,
