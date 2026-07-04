@@ -1,0 +1,12 @@
+# Konfiguration fuer Coolify/Nixpacks-Builds (Alternative zum Dockerfile).
+# Prisma 7 braucht Node >= 22.12 – wir nehmen Node 24 (LTS).
+
+[variables]
+NIXPACKS_NODE_VERSION = "24"
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+# Migrationen beim Start anwenden, dann Server starten
+cmd = "npx prisma migrate deploy && npm run start"
