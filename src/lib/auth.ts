@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/db'
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  // Selbst gehostet hinter Reverse-Proxy (Coolify/Traefik): Host-Header vertrauen
+  trustHost: true,
   session: { strategy: 'jwt' },
   pages: { signIn: '/login' },
   providers: [
