@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/db'
+import { appUrl } from '@/lib/utils'
 
 /**
  * Kurzlink: /r/{code} – zaehlt anonym (Zeitpunkt + Quelle) und leitet
@@ -15,7 +16,8 @@ export async function GET(
     include: { location: true },
   })
   if (!link) {
-    return NextResponse.redirect(new URL('/', request.url))
+    // Nicht request.url verwenden: hinter dem Reverse-Proxy ist das localhost:3000
+    return NextResponse.redirect(appUrl('/'))
   }
 
   const source = request.nextUrl.searchParams.get('src') === 'qr' ? 'QR' : 'LINK'
@@ -23,5 +25,5 @@ export async function GET(
     data: { reviewLinkId: link.id, source },
   })
 
-  return NextResponse.redirect(new URL(`/f/${link.location.slug}`, request.url))
+  return NextResponse.redirect(appUrl(`/f/${link.location.slug}`))
 }
