@@ -11,28 +11,32 @@ type SmtpConfig = {
   from: string
 }
 
+/** Versehentliche Leerzeichen (Copy-Paste) entfernen */
+const clean = (v: string | null | undefined) => v?.trim() || undefined
+
 /** SMTP-Konfiguration: Organisations-Einstellungen haben Vorrang, sonst ENV-Fallback. */
 export async function getSmtpConfig(orgId: string): Promise<SmtpConfig | null> {
   const org = await prisma.organization.findUnique({ where: { id: orgId } })
-  if (org?.smtpHost) {
+  if (clean(org?.smtpHost)) {
     return {
-      host: org.smtpHost,
-      port: org.smtpPort ?? 587,
-      secure: (org.smtpPort ?? 587) === 465,
-      user: org.smtpUser ?? undefined,
-      pass: org.smtpPass ?? undefined,
-      from: org.smtpFrom ?? org.smtpUser ?? 'noreply@example.com',
+      host: clean(org!.smtpHost)!,
+      port: org!.smtpPort ?? 587,
+      secure: (org!.smtpPort ?? 587) === 465,
+      user: clean(org!.smtpUser),
+      pass: org!.smtpPass ?? undefined,
+      from: clean(org!.smtpFrom) ?? clean(org!.smtpUser) ?? 'noreply@example.com',
     }
   }
-  if (process.env.SMTP_HOST) {
+  if (clean(process.env.SMTP_HOST)) {
     return {
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
+      host: clean(process.env.SMTP_HOST)!,
+      port: Number(clean(process.env.SMTP_PORT) ?? 587),
       secure:
-        process.env.SMTP_SECURE === 'true' || Number(process.env.SMTP_PORT ?? 587) === 465,
-      user: process.env.SMTP_USER || undefined,
-      pass: process.env.SMTP_PASS || undefined,
-      from: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? 'noreply@example.com',
+        clean(process.env.SMTP_SECURE) === 'true' ||
+        Number(clean(process.env.SMTP_PORT) ?? 587) === 465,
+      user: clean(process.env.SMTP_USER),
+      pass: process.env.SMTP_PASS?.trim() || undefined,
+      from: process.env.SMTP_FROM?.trim() || clean(process.env.SMTP_USER) || 'noreply@example.com',
     }
   }
   return null
@@ -52,6 +56,11 @@ export async function sendMail(opts: {
     port: config.port,
     secure: config.secure,
     auth: config.user ? { user: config.user, pass: config.pass } : undefined,
+    // Knappe Timeouts, damit der Nutzer schnell eine Fehlermeldung sieht,
+    // statt dass die Aktion minutenlang haengt
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 20_000,
   })
 
   try {

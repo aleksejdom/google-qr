@@ -31,12 +31,12 @@ export async function updateSmtpSettings(_prev: ActionState, formData: FormData)
   await prisma.organization.update({
     where: { id: session.orgId },
     data: {
-      smtpHost: parsed.data.smtpHost ?? null,
+      smtpHost: parsed.data.smtpHost?.trim() || null,
       smtpPort: parsed.data.smtpPort ?? null,
-      smtpUser: parsed.data.smtpUser ?? null,
+      smtpUser: parsed.data.smtpUser?.trim() || null,
       // Leeres Passwort-Feld bedeutet: bestehendes Passwort behalten
-      ...(parsed.data.smtpPass ? { smtpPass: parsed.data.smtpPass } : {}),
-      smtpFrom: parsed.data.smtpFrom ?? null,
+      ...(parsed.data.smtpPass?.trim() ? { smtpPass: parsed.data.smtpPass.trim() } : {}),
+      smtpFrom: parsed.data.smtpFrom?.trim() || null,
     },
   })
   await logAudit({ orgId: session.orgId, userId: session.userId, action: 'org.smtp_updated' })
