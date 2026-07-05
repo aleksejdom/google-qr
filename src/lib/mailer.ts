@@ -56,6 +56,8 @@ export async function sendMail(opts: {
     port: config.port,
     secure: config.secure,
     auth: config.user ? { user: config.user, pass: config.pass } : undefined,
+    // Auf 587 & Co. Verschluesselung via STARTTLS erzwingen
+    requireTLS: !config.secure,
     // Knappe Timeouts, damit der Nutzer schnell eine Fehlermeldung sieht,
     // statt dass die Aktion minutenlang haengt
     connectionTimeout: 10_000,
