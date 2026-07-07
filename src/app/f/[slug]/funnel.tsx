@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { submitFeedback, submitFunnelContact, markRequestCompleted } from '@/server/feedback-actions'
+import type { FunnelContactState } from '@/server/feedback-actions'
 import type { ActionState } from '@/server/auth-actions'
 
 type ExternalLink = { label: string; platform: string; url: string }
@@ -23,7 +24,7 @@ export function FeedbackFunnel(props: {
   const [hover, setHover] = useState(0)
   const [state, formAction, pending] = useActionState<ActionState, FormData>(submitFeedback, {})
   const [contactSkipped, setContactSkipped] = useState(false)
-  const [contactState, contactAction, contactPending] = useActionState<ActionState, FormData>(
+  const [contactState, contactAction, contactPending] = useActionState<FunnelContactState, FormData>(
     submitFunnelContact,
     {}
   )
@@ -33,6 +34,9 @@ export function FeedbackFunnel(props: {
   // kommt (requestToken vorhanden = Kontakt existiert bereits im System).
   const contactDone =
     Boolean(props.requestToken) || contactSkipped || Boolean(contactState.success)
+  // Anfrage aus der Kampagnen-Mail oder frisch im Funnel angelegt (fuer Recall):
+  // der Klick auf einen Bewertungslink markiert sie als abgeschlossen.
+  const requestToken = props.requestToken ?? contactState.requestToken
 
   if (state.success) {
     return (
@@ -137,7 +141,7 @@ export function FeedbackFunnel(props: {
               target="_blank"
               rel="noopener noreferrer"
               onClick={() => {
-                if (props.requestToken) void markRequestCompleted(props.requestToken)
+                if (requestToken) void markRequestCompleted(requestToken)
               }}
               className="block w-full rounded-md bg-zinc-900 px-4 py-2.5 text-center text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
             >

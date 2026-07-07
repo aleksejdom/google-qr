@@ -1,12 +1,17 @@
 'use client'
 
-import { useActionState } from 'react'
-import { createContact, importContactsCsv, requestConsent } from '@/server/contact-actions'
+import { useActionState, useState, useTransition } from 'react'
+import {
+  createContact,
+  importContactsCsv,
+  requestConsent,
+  getPersonalReviewLink,
+} from '@/server/contact-actions'
 import type { ActionState } from '@/server/auth-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { MailQuestion } from 'lucide-react'
+import { MailQuestion, Link2, Check } from 'lucide-react'
 
 export function ContactForm() {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(createContact, {})
@@ -43,6 +48,50 @@ export function ContactForm() {
         {pending ? 'Wird angelegt …' : 'Kontakt anlegen'}
       </Button>
     </form>
+  )
+}
+
+/**
+ * Personalisierten Bewertungslink erzeugen und in die Zwischenablage kopieren –
+ * fuer den manuellen Versand (z. B. per Outlook). Klick und Bewertung werden
+ * getrackt; ohne Reaktion greift der Recall.
+ */
+export function CopyReviewLinkButton({ contactId }: { contactId: string }) {
+  const [pending, startTransition] = useTransition()
+  const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle')
+  const [message, setMessage] = useState<string>()
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      disabled={pending}
+      title={
+        status === 'error'
+          ? message
+          : status === 'copied'
+            ? 'Link kopiert'
+            : 'Personalisierten Bewertungslink kopieren (fuer Versand per Outlook & Co.)'
+      }
+      onClick={() =>
+        startTransition(async () => {
+          const result = await getPersonalReviewLink(contactId)
+          if (result.url) {
+            await navigator.clipboard.writeText(result.url)
+            setStatus('copied')
+          } else {
+            setStatus('error')
+            setMessage(result.error)
+          }
+        })
+      }
+    >
+      {status === 'copied' ? (
+        <Check className="h-4 w-4 text-emerald-500" />
+      ) : (
+        <Link2 className={`h-4 w-4 ${status === 'error' ? 'text-red-500' : 'text-zinc-400'}`} />
+      )}
+    </Button>
   )
 }
 

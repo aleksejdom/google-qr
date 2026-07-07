@@ -166,6 +166,10 @@ model Campaign {
   status       CampaignStatus  @default(DRAFT)
   emailSubject String?
   emailBody    String?
+  // Optionaler Banner oben in der E-Mail (max. 600px breit, klickbar).
+  // Bild liegt im Storage unter banners/{id}; bannerType = MIME-Typ.
+  bannerType   String?
+  bannerLink   String?
   createdAt    DateTime        @default(now())
   org          Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   requests     ReviewRequest[]
@@ -181,6 +185,8 @@ model ReviewRequest {
   status        RequestStatus  @default(PENDING)
   token         String         @unique @default(cuid())
   sentAt        DateTime?
+  // Klick-Tracking: erster Aufruf des personalisierten Bewertungslinks
+  openedAt      DateTime?
   remindedAt    DateTime?
   reminderCount Int            @default(0)
   createdAt     DateTime       @default(now())

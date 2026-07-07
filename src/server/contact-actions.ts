@@ -116,6 +116,60 @@ export async function requestConsent(contactId: string): Promise<ActionState> {
   return { success: `Bestaetigungs-E-Mail an ${contact.email} versendet` }
 }
 
+export type PersonalLinkState = ActionState & { url?: string }
+
+/**
+ * Personalisierter Bewertungslink fuer den manuellen Versand (z. B. Outlook):
+ * legt eine offene Bewertungsanfrage an (bzw. verwendet die vorhandene) und
+ * liefert den Link mit Anfrage-Token. Damit wird Klick (openedAt) und
+ * Bewertung (COMPLETED) getrackt – bleibt beides aus, greift der Recall.
+ */
+export async function getPersonalReviewLink(contactId: string): Promise<PersonalLinkState> {
+  const session = await requireSession()
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, orgId: session.orgId },
+  })
+  if (!contact) return { error: 'Kontakt nicht gefunden' }
+  if (contact.optedOutAt) return { error: 'Kontakt hat sich abgemeldet (Opt-out)' }
+
+  let request = await prisma.reviewRequest.findFirst({
+    where: {
+      orgId: session.orgId,
+      contactId,
+      status: { in: ['PENDING', 'SENT', 'REMINDED'] },
+    },
+  })
+
+  // Standort der vorhandenen Anfrage verwenden, sonst den ersten der Organisation
+  const location = request?.locationId
+    ? await prisma.location.findUnique({ where: { id: request.locationId } })
+    : await prisma.location.findFirst({ where: { orgId: session.orgId } })
+  if (!location) return { error: 'Bitte zuerst einen Standort anlegen' }
+
+  if (!request) {
+    request = await prisma.reviewRequest.create({
+      data: {
+        orgId: session.orgId,
+        contactId,
+        locationId: location.id,
+        channel: 'EMAIL',
+        status: 'SENT',
+        sentAt: new Date(),
+      },
+    })
+    await logAudit({
+      orgId: session.orgId,
+      userId: session.userId,
+      action: 'request.personal_link_created',
+      entity: 'ReviewRequest',
+      entityId: request.id,
+    })
+    revalidatePath('/contacts')
+  }
+
+  return { success: 'Link kopiert', url: appUrl(`/f/${location.slug}?t=${request.token}`) }
+}
+
 /**
  * CSV-Import. Erwartete Spalten (Kopfzeile, flexibel):
  * vorname/firstName, nachname/lastName, email, telefon/phone,

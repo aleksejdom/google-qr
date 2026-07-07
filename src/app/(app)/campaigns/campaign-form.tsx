@@ -39,6 +39,19 @@ export function CampaignForm({ locations }: { locations: { id: string; name: str
         <Label htmlFor="emailBody">E-Mail-Text</Label>
         <Textarea id="emailBody" name="emailBody" rows={9} defaultValue={DEFAULT_EMAIL_BODY} />
       </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="banner">Banner (optional)</Label>
+        <Input id="banner" name="banner" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+        <p className="text-xs text-zinc-400">
+          Erscheint oben in der E-Mail, max. 600px breit angezeigt. PNG/JPG/WebP/GIF, max. 2 MB
+          – empfohlen 1200×400px.
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="bannerLink">Banner-Link (optional)</Label>
+        <Input id="bannerLink" name="bannerLink" type="url" placeholder="https://ihre-website.de/aktion" />
+        <p className="text-xs text-zinc-400">Klick auf den Banner oeffnet diese Seite.</p>
+      </div>
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}
       <Button type="submit" className="w-full" disabled={pending}>

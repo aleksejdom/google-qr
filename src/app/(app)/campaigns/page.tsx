@@ -37,6 +37,7 @@ export default async function CampaignsPage() {
         <p className="text-sm text-zinc-500">
           Bewertungsanfragen per E-Mail an Ihre Kontakte – mit Platzhaltern wie{' '}
           <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">{'{{vorname}}'}</code>.
+          Versendet wird nur an Kontakte mit Einwilligung.
         </p>
       </div>
 

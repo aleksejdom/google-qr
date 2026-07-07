@@ -17,6 +17,14 @@ export default async function FunnelPage({
   const { slug } = await params
   const { t } = await searchParams
 
+  // Klick-Tracking: erster Aufruf eines personalisierten Links (t = Anfrage-Token)
+  if (t) {
+    await prisma.reviewRequest.updateMany({
+      where: { token: t, openedAt: null },
+      data: { openedAt: new Date() },
+    })
+  }
+
   const location = await prisma.location.findUnique({
     where: { slug },
     include: {

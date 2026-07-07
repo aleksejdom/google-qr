@@ -87,11 +87,19 @@ const funnelContactSchema = z.object({
   email: z.string().email('Ungueltige E-Mail'),
 })
 
+export type FunnelContactState = ActionState & { requestToken?: string }
+
 /**
  * Oeffentlich (ohne Login): Besucher legt sich im Bewertungs-Funnel selbst
  * als Kontakt an und kann dabei in E-Mail-Kampagnen einwilligen.
+ * Bei erteilter Einwilligung entsteht zusaetzlich eine Bewertungsanfrage
+ * (status SENT), damit der Recall-Worker erinnert, falls die Google-Bewertung
+ * ausbleibt. Der Klick auf den Bewertungslink setzt sie auf COMPLETED.
  */
-export async function submitFunnelContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+export async function submitFunnelContact(
+  _prev: FunnelContactState,
+  formData: FormData
+): Promise<FunnelContactState> {
   const parsed = funnelContactSchema.safeParse({
     locationSlug: formData.get('locationSlug'),
     firstName: formData.get('firstName'),
@@ -119,10 +127,13 @@ export async function submitFunnelContact(_prev: ActionState, formData: FormData
   if (existing) {
     // Kontakt existiert bereits: nur Einwilligung nachtragen. Eine hier aktiv
     // erteilte Einwilligung hebt einen frueheren Opt-out wieder auf.
-    if (hasConsent && !existing.consentConfirmedAt) {
+    if (hasConsent) {
       await prisma.contact.update({
         where: { id: existing.id },
-        data: { ...consentData, optedOutAt: null },
+        data: {
+          ...(existing.consentConfirmedAt ? {} : consentData),
+          optedOutAt: null,
+        },
       })
     }
     contactId = existing.id
@@ -139,6 +150,34 @@ export async function submitFunnelContact(_prev: ActionState, formData: FormData
     contactId = contact.id
   }
 
+  // Mit Einwilligung: offene Bewertungsanfrage anlegen bzw. wiederverwenden,
+  // damit Recall-Erinnerungen greifen, wenn keine Bewertung abgegeben wird.
+  let requestToken: string | undefined
+  if (hasConsent) {
+    const openRequest = await prisma.reviewRequest.findFirst({
+      where: {
+        orgId: location.orgId,
+        contactId,
+        status: { in: ['PENDING', 'SENT', 'REMINDED'] },
+      },
+    })
+    if (openRequest) {
+      requestToken = openRequest.token
+    } else {
+      const request = await prisma.reviewRequest.create({
+        data: {
+          orgId: location.orgId,
+          contactId,
+          locationId: location.id,
+          channel: 'EMAIL',
+          status: 'SENT',
+          sentAt: new Date(),
+        },
+      })
+      requestToken = request.token
+    }
+  }
+
   await logAudit({
     orgId: location.orgId,
     action: 'contact.funnel_signup',
@@ -146,7 +185,7 @@ export async function submitFunnelContact(_prev: ActionState, formData: FormData
     entityId: contactId,
     meta: { consent: hasConsent, existing: Boolean(existing) },
   })
-  return { success: 'Vielen Dank!' }
+  return { success: 'Vielen Dank!', requestToken }
 }
 
 /** Klick auf externen Bewertungslink im Funnel als abgeschlossen markieren. */

@@ -20,6 +20,9 @@ async function processRecalls() {
     include: { org: true },
   })
 
+  // Pro Lauf jeden Kontakt nur einmal erinnern (auch bei mehreren offenen Anfragen)
+  const remindedContacts = new Set<string>()
+
   for (const rule of rules) {
     const requests = await prisma.reviewRequest.findMany({
       where: {
@@ -29,13 +32,19 @@ async function processRecalls() {
         sentAt: { lte: subDays(new Date(), rule.daysAfter) },
         reminderCount: { lt: rule.maxReminders },
         feedback: null,
-        contact: { optedOutAt: null, email: { not: null } },
+        contact: {
+          optedOutAt: null,
+          email: { not: null },
+          // Wer bereits (irgendwo) eine Bewertung abgegeben hat, wird nicht erinnert
+          requests: { none: { status: 'COMPLETED' } },
+        },
       },
       include: { contact: true, location: true },
       take: 200,
     })
 
     for (const request of requests) {
+      if (remindedContacts.has(request.contactId)) continue
       // Nicht doppelt erinnern, bevor wieder "daysAfter" Tage vergangen sind
       if (request.remindedAt && request.remindedAt > subDays(new Date(), rule.daysAfter)) continue
 
@@ -60,6 +69,7 @@ async function processRecalls() {
       })
 
       if (result.ok) {
+        remindedContacts.add(request.contactId)
         await prisma.reviewRequest.update({
           where: { id: request.id },
           data: {

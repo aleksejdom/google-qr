@@ -5,7 +5,8 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/db'
 import { requireSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { sendMail, renderTemplate } from '@/lib/mailer'
+import { sendMail, renderTemplate, renderEmailHtml } from '@/lib/mailer'
+import { saveFile, deleteFile } from '@/lib/storage'
 import { appUrl } from '@/lib/utils'
 import type { ActionState } from '@/server/auth-actions'
 import { DEFAULT_EMAIL_SUBJECT, DEFAULT_EMAIL_BODY } from '@/server/templates'
@@ -16,7 +17,10 @@ const campaignSchema = z.object({
   channel: z.enum(['EMAIL', 'QR', 'SMS_TEMPLATE', 'WHATSAPP_LINK']),
   emailSubject: z.string().optional(),
   emailBody: z.string().optional(),
+  bannerLink: z.string().url('Banner-Link ist keine gueltige URL').optional().or(z.literal('')),
 })
+
+const BANNER_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
 export async function createCampaign(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await requireSession()
@@ -26,12 +30,33 @@ export async function createCampaign(_prev: ActionState, formData: FormData): Pr
     channel: formData.get('channel') || 'EMAIL',
     emailSubject: formData.get('emailSubject') || DEFAULT_EMAIL_SUBJECT,
     emailBody: formData.get('emailBody') || DEFAULT_EMAIL_BODY,
+    bannerLink: formData.get('bannerLink') || '',
   })
   if (!parsed.success) return { error: parsed.error.issues[0]?.message }
 
+  // Optionaler Banner (wird in der E-Mail mit max. 600px Breite angezeigt)
+  const banner = formData.get('banner')
+  let bannerType: string | null = null
+  if (banner instanceof File && banner.size > 0) {
+    if (banner.size > 2 * 1024 * 1024) return { error: 'Banner ist groesser als 2 MB' }
+    if (!BANNER_TYPES.includes(banner.type)) return { error: 'Banner: nur PNG, JPG, WebP oder GIF' }
+    bannerType = banner.type
+  }
+
+  const { bannerLink, ...campaignData } = parsed.data
   const campaign = await prisma.campaign.create({
-    data: { ...parsed.data, locationId: parsed.data.locationId || null, orgId: session.orgId },
+    data: {
+      ...campaignData,
+      locationId: parsed.data.locationId || null,
+      orgId: session.orgId,
+      bannerType,
+      bannerLink: bannerType ? bannerLink || null : null,
+    },
   })
+  if (bannerType && banner instanceof File) {
+    const buffer = Buffer.from(await banner.arrayBuffer())
+    await saveFile(`banners/${campaign.id}`, buffer, bannerType)
+  }
   await logAudit({
     orgId: session.orgId,
     userId: session.userId,
@@ -45,14 +70,17 @@ export async function createCampaign(_prev: ActionState, formData: FormData): Pr
 
 export async function deleteCampaign(campaignId: string): Promise<void> {
   const session = await requireSession()
-  await prisma.campaign.deleteMany({ where: { id: campaignId, orgId: session.orgId } })
+  const { count } = await prisma.campaign.deleteMany({
+    where: { id: campaignId, orgId: session.orgId },
+  })
+  if (count > 0) await deleteFile(`banners/${campaignId}`)
   revalidatePath('/campaigns')
 }
 
 /**
- * E-Mail-Kampagne versenden: erstellt fuer jeden Kontakt mit E-Mail (ohne Opt-out,
- * ohne bereits vorhandene Anfrage in dieser Kampagne) eine ReviewRequest und
- * verschickt die E-Mail ueber SMTP.
+ * E-Mail-Kampagne versenden: erstellt fuer jeden Kontakt mit E-Mail und
+ * Einwilligung (ohne Opt-out, ohne bereits vorhandene Anfrage in dieser
+ * Kampagne) eine ReviewRequest und verschickt die E-Mail ueber SMTP.
  */
 export async function sendCampaign(campaignId: string): Promise<ActionState> {
   const session = await requireSession()
@@ -73,6 +101,8 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       orgId: session.orgId,
       optedOutAt: null,
       email: { not: null },
+      // Nur an Kontakte, die eingewilligt haben (DSGVO)
+      consentAt: { not: null },
       requests: { none: { campaignId } },
     },
   })
@@ -82,19 +112,22 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
     where: {
       campaignId,
       status: { in: ['FAILED', 'PENDING'] },
-      contact: { optedOutAt: null, email: { not: null } },
+      contact: { optedOutAt: null, email: { not: null }, consentAt: { not: null } },
     },
     include: { contact: true },
   })
 
   if (contacts.length === 0 && retryRequests.length === 0) {
     // Genau erklaeren, warum niemand uebrig bleibt
-    const [total, withEmail, optedOut, alreadySent] = await Promise.all([
+    const [total, withEmail, optedOut, alreadySent, withoutConsent] = await Promise.all([
       prisma.contact.count({ where: { orgId: session.orgId } }),
       prisma.contact.count({ where: { orgId: session.orgId, email: { not: null } } }),
       prisma.contact.count({ where: { orgId: session.orgId, optedOutAt: { not: null } } }),
       prisma.contact.count({
         where: { orgId: session.orgId, requests: { some: { campaignId } } },
+      }),
+      prisma.contact.count({
+        where: { orgId: session.orgId, email: { not: null }, optedOutAt: null, consentAt: null },
       }),
     ])
     if (total === 0) return { error: 'Noch keine Kontakte vorhanden – zuerst unter „Kontakte“ anlegen oder per CSV importieren.' }
@@ -103,8 +136,12 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       return {
         error: `Alle passenden Kontakte (${alreadySent}) haben aus dieser Kampagne bereits eine Anfrage erhalten. Neue Kontakte anlegen oder eine neue Kampagne erstellen.`,
       }
+    if (withoutConsent > 0)
+      return {
+        error: `${withoutConsent} Kontakt(e) mit E-Mail, aber ohne Einwilligung – Kampagnen gehen nur an eingewilligte Kontakte. Unter „Kontakte“ die Einwilligung erfassen oder per Bestaetigungs-Mail anfragen.`,
+      }
     if (optedOut > 0) return { error: `Alle Kontakte mit E-Mail haben sich abgemeldet (Opt-out: ${optedOut}).` }
-    return { error: 'Keine passenden Kontakte (mit E-Mail, ohne Opt-out) gefunden.' }
+    return { error: 'Keine passenden Kontakte (mit E-Mail, Einwilligung, ohne Opt-out) gefunden.' }
   }
 
   let sent = 0
@@ -117,6 +154,14 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
     contact: { firstName: string; lastName: string | null; email: string | null; optOutToken: string }
   }
 
+  // Banner-Bild wird per URL eingebunden (E-Mail-Clients laden es beim Oeffnen)
+  const banner = campaign.bannerType
+    ? {
+        url: appUrl(`/api/campaigns/${campaign.id}/banner`),
+        link: campaign.bannerLink ?? undefined,
+      }
+    : undefined
+
   async function deliver(target: SendTarget) {
     const vars = {
       vorname: target.contact.firstName,
@@ -126,11 +171,13 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       bewertungslink: appUrl(`/f/${location!.slug}?t=${target.token}`),
       abmeldelink: appUrl(`/opt-out/${target.contact.optOutToken}`),
     }
+    const text = renderTemplate(campaign!.emailBody ?? DEFAULT_EMAIL_BODY, vars)
     const result = await sendMail({
       orgId: session.orgId,
       to: target.contact.email!,
       subject: renderTemplate(campaign!.emailSubject ?? DEFAULT_EMAIL_SUBJECT, vars),
-      text: renderTemplate(campaign!.emailBody ?? DEFAULT_EMAIL_BODY, vars),
+      text,
+      html: banner ? renderEmailHtml(text, banner) : undefined,
     })
     await prisma.reviewRequest.update({
       where: { id: target.requestId },

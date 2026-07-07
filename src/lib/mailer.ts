@@ -47,6 +47,7 @@ export async function sendMail(opts: {
   to: string
   subject: string
   text: string
+  html?: string
 }): Promise<{ ok: boolean; error?: string }> {
   const config = await getSmtpConfig(opts.orgId)
   if (!config) return { ok: false, error: 'Kein SMTP konfiguriert' }
@@ -71,6 +72,7 @@ export async function sendMail(opts: {
       to: opts.to,
       subject: opts.subject,
       text: opts.text,
+      html: opts.html,
     })
     return { ok: true }
   } catch (err) {
@@ -82,4 +84,43 @@ export async function sendMail(opts: {
 /** Platzhalter wie {{vorname}} in Vorlagen ersetzen. */
 export function renderTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? '')
+}
+
+const escapeHtml = (s: string) =>
+  s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+
+/**
+ * HTML-Variante einer E-Mail: optionaler Banner (max. 600px breit, klickbar)
+ * ueber dem Text. Der Text wird escaped, Zeilenumbrueche werden zu <br>,
+ * URLs zu Links.
+ */
+export function renderEmailHtml(text: string, banner?: { url: string; link?: string }): string {
+  const body = escapeHtml(text)
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#2563eb">$1</a>')
+    .replace(/\n/g, '<br>\n')
+
+  const img = banner
+    ? `<img src="${banner.url}" alt="" width="600" style="width:100%;max-width:600px;height:auto;display:block;border:0;border-radius:8px" />`
+    : ''
+  const bannerHtml = banner
+    ? banner.link
+      ? `<a href="${escapeHtml(banner.link)}" target="_blank">${img}</a>`
+      : img
+    : ''
+
+  return `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f4f4f5">
+    <div style="max-width:600px;margin:0 auto;padding:24px 16px;font-family:Arial,Helvetica,sans-serif">
+      ${bannerHtml}
+      <div style="padding:20px 0;font-size:15px;line-height:1.6;color:#27272a">
+        ${body}
+      </div>
+    </div>
+  </body>
+</html>`
 }

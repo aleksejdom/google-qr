@@ -6,7 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ContactForm, CsvImportForm, RequestConsentButton } from './contact-forms'
+import {
+  ContactForm,
+  CsvImportForm,
+  RequestConsentButton,
+  CopyReviewLinkButton,
+} from './contact-forms'
 import { Trash2, Download, FileJson } from 'lucide-react'
 
 export default async function ContactsPage() {
@@ -90,6 +95,7 @@ export default async function ContactsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
+                          {!contact.optedOutAt && <CopyReviewLinkButton contactId={contact.id} />}
                           {contact.email && !contact.consentConfirmedAt && !contact.optedOutAt && (
                             <RequestConsentButton contactId={contact.id} />
                           )}
