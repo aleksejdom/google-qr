@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { submitFeedback, markRequestCompleted } from '@/server/feedback-actions'
+import { submitFeedback, submitFunnelContact, markRequestCompleted } from '@/server/feedback-actions'
 import type { ActionState } from '@/server/auth-actions'
 
 type ExternalLink = { label: string; platform: string; url: string }
@@ -22,8 +22,17 @@ export function FeedbackFunnel(props: {
   const [rating, setRating] = useState(0)
   const [hover, setHover] = useState(0)
   const [state, formAction, pending] = useActionState<ActionState, FormData>(submitFeedback, {})
+  const [contactSkipped, setContactSkipped] = useState(false)
+  const [contactState, contactAction, contactPending] = useActionState<ActionState, FormData>(
+    submitFunnelContact,
+    {}
+  )
 
   const positive = rating >= props.threshold
+  // Kontakt-Schritt entfaellt, wenn der Besucher ueber eine Kampagnen-E-Mail
+  // kommt (requestToken vorhanden = Kontakt existiert bereits im System).
+  const contactDone =
+    Boolean(props.requestToken) || contactSkipped || Boolean(contactState.success)
 
   if (state.success) {
     return (
@@ -66,7 +75,52 @@ export function FeedbackFunnel(props: {
         ))}
       </div>
 
-      {rating > 0 && positive && (
+      {rating > 0 && positive && !contactDone && (
+        <form action={contactAction} className="space-y-4">
+          <input type="hidden" name="locationSlug" value={props.locationSlug} />
+          <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
+            Das freut uns sehr! Verraten Sie uns kurz, wer Sie sind?
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="firstName">Vorname</Label>
+              <Input id="firstName" name="firstName" required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="lastName">Nachname</Label>
+              <Input id="lastName" name="lastName" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">E-Mail</Label>
+            <Input id="email" name="email" type="email" required placeholder="ihre@email.de" />
+          </div>
+          <label className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+            <input
+              type="checkbox"
+              name="consent"
+              className="mt-0.5 accent-zinc-900 dark:accent-zinc-100"
+            />
+            <span>
+              Ja, {props.orgName} darf mich kuenftig per E-Mail um Bewertungen bitten (jederzeit
+              widerrufbar).
+            </span>
+          </label>
+          {contactState.error && <p className="text-sm text-red-600">{contactState.error}</p>}
+          <Button type="submit" className="w-full" disabled={contactPending}>
+            {contactPending ? 'Wird gespeichert …' : 'Weiter'}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setContactSkipped(true)}
+            className="w-full text-center text-xs text-zinc-400 hover:underline"
+          >
+            Ueberspringen
+          </button>
+        </form>
+      )}
+
+      {rating > 0 && positive && contactDone && (
         <div className="space-y-3">
           <p className="text-center text-sm text-zinc-600 dark:text-zinc-400">
             Das freut uns sehr! Teilen Sie Ihre Erfahrung gerne oeffentlich:

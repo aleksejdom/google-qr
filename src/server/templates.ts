@@ -53,6 +53,9 @@ Keine weiteren E-Mails erhalten: {{abmeldelink}}`
 export const CONSENT_TEXT_MANUAL =
   'Einwilligung zum Erhalt von Bewertungsanfragen per E-Mail liegt vor (vom Betreiber bei der Erfassung bestaetigt).'
 
+export const CONSENT_TEXT_FUNNEL =
+  'Der Kontakt hat seine Daten selbst im Bewertungs-Funnel angegeben und dabei eingewilligt, Bewertungsanfragen per E-Mail zu erhalten. Die Einwilligung ist jederzeit ueber den Abmeldelink widerrufbar.'
+
 export const CONSENT_TEXT_CONFIRMED =
   'Der Kontakt hat per Bestaetigungslink (Double-Opt-in) eingewilligt, Bewertungsanfragen per E-Mail zu erhalten. Die Einwilligung ist jederzeit ueber den Abmeldelink widerrufbar.'
 

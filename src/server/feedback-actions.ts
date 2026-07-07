@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db'
 import { requireSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
 import type { ActionState } from '@/server/auth-actions'
+import { CONSENT_TEXT_FUNNEL } from '@/server/templates'
 
 const feedbackSchema = z.object({
   locationSlug: z.string().min(1),
@@ -77,6 +78,75 @@ export async function submitFeedback(_prev: ActionState, formData: FormData): Pr
     meta: { rating: parsed.data.rating },
   })
   return { success: 'Vielen Dank fuer Ihr Feedback!' }
+}
+
+const funnelContactSchema = z.object({
+  locationSlug: z.string().min(1),
+  firstName: z.string().min(1, 'Vorname fehlt'),
+  lastName: z.string().optional(),
+  email: z.string().email('Ungueltige E-Mail'),
+})
+
+/**
+ * Oeffentlich (ohne Login): Besucher legt sich im Bewertungs-Funnel selbst
+ * als Kontakt an und kann dabei in E-Mail-Kampagnen einwilligen.
+ */
+export async function submitFunnelContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = funnelContactSchema.safeParse({
+    locationSlug: formData.get('locationSlug'),
+    firstName: formData.get('firstName'),
+    lastName: formData.get('lastName') || undefined,
+    email: formData.get('email'),
+  })
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message }
+
+  const location = await prisma.location.findUnique({
+    where: { slug: parsed.data.locationSlug },
+  })
+  if (!location) return { error: 'Standort nicht gefunden' }
+
+  const email = parsed.data.email.toLowerCase().trim()
+  const hasConsent = formData.get('consent') === 'on'
+  const consentData = hasConsent
+    ? { consentAt: new Date(), consentText: CONSENT_TEXT_FUNNEL }
+    : {}
+
+  const existing = await prisma.contact.findFirst({
+    where: { orgId: location.orgId, email },
+  })
+
+  let contactId: string
+  if (existing) {
+    // Kontakt existiert bereits: nur Einwilligung nachtragen. Eine hier aktiv
+    // erteilte Einwilligung hebt einen frueheren Opt-out wieder auf.
+    if (hasConsent && !existing.consentConfirmedAt) {
+      await prisma.contact.update({
+        where: { id: existing.id },
+        data: { ...consentData, optedOutAt: null },
+      })
+    }
+    contactId = existing.id
+  } else {
+    const contact = await prisma.contact.create({
+      data: {
+        orgId: location.orgId,
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName || null,
+        email,
+        ...consentData,
+      },
+    })
+    contactId = contact.id
+  }
+
+  await logAudit({
+    orgId: location.orgId,
+    action: 'contact.funnel_signup',
+    entity: 'Contact',
+    entityId: contactId,
+    meta: { consent: hasConsent, existing: Boolean(existing) },
+  })
+  return { success: 'Vielen Dank!' }
 }
 
 /** Klick auf externen Bewertungslink im Funnel als abgeschlossen markieren. */
