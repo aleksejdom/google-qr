@@ -39,6 +39,9 @@ export async function GET(
         email: contact.email,
         telefon: contact.phone,
         opt_out: contact.optedOutAt,
+        einwilligung_erfasst: contact.consentAt,
+        einwilligung_bestaetigt: contact.consentConfirmedAt,
+        einwilligung_text: contact.consentText,
         erstellt: contact.createdAt,
       },
       bewertungsanfragen: contact.requests.map((r) => ({

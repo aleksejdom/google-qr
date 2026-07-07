@@ -137,15 +137,20 @@ model ScanEvent {
 }
 
 model Contact {
-  id          String          @id @default(cuid())
-  orgId       String
-  firstName   String
-  lastName    String?
-  email       String?
-  phone       String?
-  optOutToken String          @unique @default(cuid())
-  optedOutAt  DateTime?
-  createdAt   DateTime        @default(now())
+  id                 String          @id @default(cuid())
+  orgId              String
+  firstName          String
+  lastName           String?
+  email              String?
+  phone              String?
+  optOutToken        String          @unique @default(cuid())
+  optedOutAt         DateTime?
+  // Einwilligung fuer E-Mail-Anfragen (DSGVO-Nachweis)
+  consentAt          DateTime?
+  consentConfirmedAt DateTime?
+  consentText        String?
+  consentToken       String          @unique @default(cuid())
+  createdAt          DateTime        @default(now())
   org         Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   requests    ReviewRequest[]
 

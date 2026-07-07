@@ -1,11 +1,12 @@
 'use client'
 
 import { useActionState } from 'react'
-import { createContact, importContactsCsv } from '@/server/contact-actions'
+import { createContact, importContactsCsv, requestConsent } from '@/server/contact-actions'
 import type { ActionState } from '@/server/auth-actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { MailQuestion } from 'lucide-react'
 
 export function ContactForm() {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(createContact, {})
@@ -30,10 +31,46 @@ export function ContactForm() {
         <Label htmlFor="phone">Telefon</Label>
         <Input id="phone" name="phone" />
       </div>
+      <label className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <input type="checkbox" name="consent" className="mt-0.5 accent-zinc-900 dark:accent-zinc-100" />
+        <span>
+          Einwilligung fuer E-Mail-Anfragen liegt vor (z. B. muendlich oder schriftlich erteilt)
+        </span>
+      </label>
       {state.error && <p className="text-sm text-red-600">{state.error}</p>}
       {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}
       <Button type="submit" className="w-full" disabled={pending}>
         {pending ? 'Wird angelegt …' : 'Kontakt anlegen'}
+      </Button>
+    </form>
+  )
+}
+
+/** Double-Opt-in: Bestaetigungs-E-Mail an einen Kontakt ausloesen. */
+export function RequestConsentButton({ contactId }: { contactId: string }) {
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(
+    () => requestConsent(contactId),
+    {}
+  )
+
+  return (
+    <form action={formAction} className="inline-flex">
+      <Button
+        type="submit"
+        variant="ghost"
+        size="icon"
+        disabled={pending}
+        title={
+          state.error ??
+          state.success ??
+          'Einwilligung per Bestaetigungs-E-Mail anfragen (Double-Opt-in)'
+        }
+      >
+        <MailQuestion
+          className={`h-4 w-4 ${
+            state.error ? 'text-red-500' : state.success ? 'text-emerald-500' : 'text-zinc-400'
+          }`}
+        />
       </Button>
     </form>
   )

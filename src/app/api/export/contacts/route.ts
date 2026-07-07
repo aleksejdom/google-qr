@@ -21,6 +21,8 @@ export async function GET() {
       email: c.email ?? '',
       telefon: c.phone ?? '',
       opt_out: c.optedOutAt ? c.optedOutAt.toISOString() : '',
+      einwilligung_erfasst: c.consentAt ? c.consentAt.toISOString() : '',
+      einwilligung_bestaetigt: c.consentConfirmedAt ? c.consentConfirmedAt.toISOString() : '',
       erstellt: c.createdAt.toISOString(),
     }))
   )

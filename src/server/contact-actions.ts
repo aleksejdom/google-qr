@@ -6,7 +6,14 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/db'
 import { requireSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
+import { sendMail, renderTemplate } from '@/lib/mailer'
+import { appUrl } from '@/lib/utils'
 import type { ActionState } from '@/server/auth-actions'
+import {
+  CONSENT_EMAIL_SUBJECT,
+  CONSENT_EMAIL_BODY,
+  CONSENT_TEXT_MANUAL,
+} from '@/server/templates'
 
 const contactSchema = z.object({
   firstName: z.string().min(1, 'Vorname fehlt'),
@@ -31,6 +38,7 @@ export async function createContact(_prev: ActionState, formData: FormData): Pro
     if (dupe) return { error: 'Kontakt mit dieser E-Mail existiert bereits' }
   }
 
+  const hasConsent = formData.get('consent') === 'on'
   const contact = await prisma.contact.create({
     data: {
       orgId: session.orgId,
@@ -38,6 +46,8 @@ export async function createContact(_prev: ActionState, formData: FormData): Pro
       lastName: parsed.data.lastName,
       email,
       phone: parsed.data.phone,
+      consentAt: hasConsent ? new Date() : null,
+      consentText: hasConsent ? CONSENT_TEXT_MANUAL : null,
     },
   })
   await logAudit({
@@ -66,8 +76,50 @@ export async function deleteContact(contactId: string): Promise<void> {
 }
 
 /**
+ * Double-Opt-in: Bestaetigungs-E-Mail an den Kontakt senden.
+ * Der Kontakt bestaetigt per Link (/consent/[token]), dass er
+ * Bewertungsanfragen per E-Mail erhalten moechte.
+ */
+export async function requestConsent(contactId: string): Promise<ActionState> {
+  const session = await requireSession()
+  const contact = await prisma.contact.findFirst({
+    where: { id: contactId, orgId: session.orgId },
+    include: { org: true },
+  })
+  if (!contact) return { error: 'Kontakt nicht gefunden' }
+  if (!contact.email) return { error: 'Kontakt hat keine E-Mail-Adresse' }
+  if (contact.optedOutAt) return { error: 'Kontakt hat sich abgemeldet (Opt-out)' }
+  if (contact.consentConfirmedAt) return { error: 'Einwilligung wurde bereits bestaetigt' }
+
+  const vars = {
+    vorname: contact.firstName,
+    nachname: contact.lastName ?? '',
+    firma: contact.org.name,
+    bestaetigungslink: appUrl(`/consent/${contact.consentToken}`),
+    abmeldelink: appUrl(`/opt-out/${contact.optOutToken}`),
+  }
+  const result = await sendMail({
+    orgId: session.orgId,
+    to: contact.email,
+    subject: renderTemplate(CONSENT_EMAIL_SUBJECT, vars),
+    text: renderTemplate(CONSENT_EMAIL_BODY, vars),
+  })
+  if (!result.ok) return { error: `Versand fehlgeschlagen: ${result.error ?? 'Unbekannter Fehler'}` }
+
+  await logAudit({
+    orgId: session.orgId,
+    userId: session.userId,
+    action: 'contact.consent_requested',
+    entity: 'Contact',
+    entityId: contact.id,
+  })
+  return { success: `Bestaetigungs-E-Mail an ${contact.email} versendet` }
+}
+
+/**
  * CSV-Import. Erwartete Spalten (Kopfzeile, flexibel):
- * vorname/firstName, nachname/lastName, email, telefon/phone
+ * vorname/firstName, nachname/lastName, email, telefon/phone,
+ * einwilligung/consent (ja/yes/true/1 = Einwilligung liegt vor)
  */
 export async function importContactsCsv(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await requireSession()
@@ -89,6 +141,8 @@ export async function importContactsCsv(_prev: ActionState, formData: FormData):
     const lastName = row['nachname'] ?? row['lastname'] ?? row['last_name'] ?? ''
     const email = (row['email'] ?? row['e-mail'] ?? '').toLowerCase().trim()
     const phone = row['telefon'] ?? row['phone'] ?? row['tel'] ?? ''
+    const consentRaw = (row['einwilligung'] ?? row['consent'] ?? '').toLowerCase().trim()
+    const hasConsent = ['ja', 'yes', 'true', '1', 'x'].includes(consentRaw)
 
     if (!firstName && !email) {
       skipped++
@@ -108,6 +162,8 @@ export async function importContactsCsv(_prev: ActionState, formData: FormData):
         lastName: lastName || null,
         email: email || null,
         phone: phone || null,
+        consentAt: hasConsent ? new Date() : null,
+        consentText: hasConsent ? CONSENT_TEXT_MANUAL : null,
       },
     })
     imported++

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ContactForm, CsvImportForm } from './contact-forms'
+import { ContactForm, CsvImportForm, RequestConsentButton } from './contact-forms'
 import { Trash2, Download, FileJson } from 'lucide-react'
 
 export default async function ContactsPage() {
@@ -44,6 +44,7 @@ export default async function ContactsPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>E-Mail</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Einwilligung</TableHead>
                     <TableHead>Anfragen</TableHead>
                     <TableHead>Erstellt</TableHead>
                     <TableHead className="text-right">Aktionen</TableHead>
@@ -52,7 +53,7 @@ export default async function ContactsPage() {
                 <TableBody>
                   {contacts.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-zinc-500">
+                      <TableCell colSpan={7} className="py-8 text-center text-zinc-500">
                         Noch keine Kontakte – rechts anlegen oder CSV importieren.
                       </TableCell>
                     </TableRow>
@@ -70,12 +71,28 @@ export default async function ContactsPage() {
                           <Badge variant="success">Aktiv</Badge>
                         )}
                       </TableCell>
+                      <TableCell>
+                        {contact.consentConfirmedAt ? (
+                          <Badge variant="success" title={`Bestaetigt am ${format(contact.consentConfirmedAt, 'dd.MM.yyyy')} (Double-Opt-in)`}>
+                            Bestaetigt
+                          </Badge>
+                        ) : contact.consentAt ? (
+                          <Badge variant="secondary" title={`Erfasst am ${format(contact.consentAt, 'dd.MM.yyyy')}`}>
+                            Erfasst
+                          </Badge>
+                        ) : (
+                          <Badge variant="warning">Fehlt</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>{contact._count.requests}</TableCell>
                       <TableCell className="text-zinc-500">
                         {format(contact.createdAt, 'dd.MM.yyyy')}
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-1">
+                          {contact.email && !contact.consentConfirmedAt && !contact.optedOutAt && (
+                            <RequestConsentButton contactId={contact.id} />
+                          )}
                           <a
                             href={`/api/export/contact/${contact.id}`}
                             title="DSGVO-Datenexport (JSON)"
@@ -116,7 +133,8 @@ export default async function ContactsPage() {
             <CardHeader>
               <CardTitle>CSV-Import</CardTitle>
               <CardDescription>
-                Spalten: vorname, nachname, email, telefon (Kopfzeile erforderlich)
+                Spalten: vorname, nachname, email, telefon, einwilligung (ja/nein) – Kopfzeile
+                erforderlich
               </CardDescription>
             </CardHeader>
             <CardContent>
