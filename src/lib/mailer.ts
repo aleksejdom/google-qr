@@ -98,6 +98,10 @@ export async function createMailer(
       ? { name: opts.fromName, address: config.from }
       : config.from
 
+  // Reine Absender-Adresse fuer die mailto-Variante von List-Unsubscribe –
+  // Outlook/Microsoft werten mailto zuverlaessiger aus als die URL-Variante
+  const fromAddress = config.from.match(/<([^>]+)>/)?.[1] ?? config.from
+
   return {
     async send(msg) {
       try {
@@ -111,7 +115,7 @@ export async function createMailer(
           html: msg.html ?? renderEmailHtml(msg.text),
           headers: msg.unsubscribeUrl
             ? {
-                'List-Unsubscribe': `<${msg.unsubscribeUrl}>`,
+                'List-Unsubscribe': `<mailto:${fromAddress}?subject=unsubscribe>, <${msg.unsubscribeUrl}>`,
                 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
               }
             : undefined,
