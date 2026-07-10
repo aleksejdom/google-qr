@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/db'
 import { requireSession } from '@/lib/session'
 import { logAudit } from '@/lib/audit'
-import { sendMail, renderTemplate, renderEmailHtml } from '@/lib/mailer'
+import { createMailer, renderTemplate, renderEmailHtml } from '@/lib/mailer'
 import { saveFile, deleteFile } from '@/lib/storage'
 import { appUrl } from '@/lib/utils'
 import type { ActionState } from '@/server/auth-actions'
@@ -66,6 +66,62 @@ export async function createCampaign(_prev: ActionState, formData: FormData): Pr
   })
   revalidatePath('/campaigns')
   return { success: 'Kampagne angelegt' }
+}
+
+/** Bestehende Kampagne bearbeiten (Name, Standort, Texte, Banner). */
+export async function updateCampaign(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const session = await requireSession()
+  const campaignId = String(formData.get('campaignId') ?? '')
+  const existing = await prisma.campaign.findFirst({
+    where: { id: campaignId, orgId: session.orgId },
+  })
+  if (!existing) return { error: 'Kampagne nicht gefunden' }
+
+  const parsed = campaignSchema.safeParse({
+    name: formData.get('name'),
+    locationId: formData.get('locationId') || undefined,
+    channel: formData.get('channel') || existing.channel,
+    emailSubject: formData.get('emailSubject') || DEFAULT_EMAIL_SUBJECT,
+    emailBody: formData.get('emailBody') || DEFAULT_EMAIL_BODY,
+    bannerLink: formData.get('bannerLink') || '',
+  })
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message }
+
+  const banner = formData.get('banner')
+  const hasNewBanner = banner instanceof File && banner.size > 0
+  if (hasNewBanner) {
+    if (banner.size > 2 * 1024 * 1024) return { error: 'Banner ist groesser als 2 MB' }
+    if (!BANNER_TYPES.includes(banner.type)) return { error: 'Banner: nur PNG, JPG, WebP oder GIF' }
+  }
+  const removeBanner = formData.get('removeBanner') === 'on' && !hasNewBanner
+
+  const bannerType = hasNewBanner ? banner.type : removeBanner ? null : existing.bannerType
+  const { bannerLink, ...campaignData } = parsed.data
+  await prisma.campaign.update({
+    where: { id: existing.id },
+    data: {
+      ...campaignData,
+      locationId: parsed.data.locationId || null,
+      bannerType,
+      bannerLink: bannerType ? bannerLink || null : null,
+    },
+  })
+  if (hasNewBanner) {
+    const buffer = Buffer.from(await banner.arrayBuffer())
+    await saveFile(`banners/${existing.id}`, buffer, banner.type)
+  } else if (removeBanner && existing.bannerType) {
+    await deleteFile(`banners/${existing.id}`)
+  }
+
+  await logAudit({
+    orgId: session.orgId,
+    userId: session.userId,
+    action: 'campaign.updated',
+    entity: 'Campaign',
+    entityId: existing.id,
+  })
+  revalidatePath('/campaigns')
+  return { success: 'Kampagne gespeichert' }
 }
 
 export async function deleteCampaign(campaignId: string): Promise<void> {
@@ -162,6 +218,11 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       }
     : undefined
 
+  // Ein gepoolter, gedrosselter Mailer fuer den gesamten Versand –
+  // eine SMTP-Sitzung statt Verbindung pro Mail (Zustellbarkeit)
+  const mailer = await createMailer(session.orgId, { fromName: campaign.org.name })
+  if (!mailer) return { error: 'Kein SMTP konfiguriert – unter Einstellungen hinterlegen.' }
+
   async function deliver(target: SendTarget) {
     const vars = {
       vorname: target.contact.firstName,
@@ -172,12 +233,12 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
       abmeldelink: appUrl(`/opt-out/${target.contact.optOutToken}`),
     }
     const text = renderTemplate(campaign!.emailBody ?? DEFAULT_EMAIL_BODY, vars)
-    const result = await sendMail({
-      orgId: session.orgId,
+    const result = await mailer!.send({
       to: target.contact.email!,
       subject: renderTemplate(campaign!.emailSubject ?? DEFAULT_EMAIL_SUBJECT, vars),
       text,
-      html: banner ? renderEmailHtml(text, banner) : undefined,
+      html: renderEmailHtml(text, banner),
+      unsubscribeUrl: appUrl(`/api/opt-out/${target.contact.optOutToken}`),
     })
     await prisma.reviewRequest.update({
       where: { id: target.requestId },
@@ -190,23 +251,27 @@ export async function sendCampaign(campaignId: string): Promise<ActionState> {
     }
   }
 
-  // Neue Kontakte: Anfrage anlegen und versenden
-  for (const contact of contacts) {
-    const request = await prisma.reviewRequest.create({
-      data: {
-        orgId: session.orgId,
-        campaignId,
-        contactId: contact.id,
-        locationId: location.id,
-        channel: 'EMAIL',
-      },
-    })
-    await deliver({ requestId: request.id, token: request.token, contact })
-  }
+  try {
+    // Neue Kontakte: Anfrage anlegen und versenden
+    for (const contact of contacts) {
+      const request = await prisma.reviewRequest.create({
+        data: {
+          orgId: session.orgId,
+          campaignId,
+          contactId: contact.id,
+          locationId: location.id,
+          channel: 'EMAIL',
+        },
+      })
+      await deliver({ requestId: request.id, token: request.token, contact })
+    }
 
-  // Fehlgeschlagene Anfragen erneut versuchen
-  for (const request of retryRequests) {
-    await deliver({ requestId: request.id, token: request.token, contact: request.contact })
+    // Fehlgeschlagene Anfragen erneut versuchen
+    for (const request of retryRequests) {
+      await deliver({ requestId: request.id, token: request.token, contact: request.contact })
+    }
+  } finally {
+    mailer.close()
   }
 
   if (campaign.status === 'DRAFT') {

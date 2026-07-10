@@ -64,6 +64,12 @@ export function SmtpForm({
           <Input id="smtpFrom" name="smtpFrom" defaultValue={defaults.smtpFrom} placeholder="Firma <noreply@firma.de>" />
         </div>
       </div>
+      <p className="rounded-md bg-zinc-50 p-3 text-xs text-zinc-500 dark:bg-zinc-900">
+        Damit E-Mails nicht im Spam landen: Die Absender-Adresse sollte zur Domain des
+        SMTP-Kontos gehoeren, und fuer diese Domain sollten SPF-, DKIM- und DMARC-Eintraege
+        gesetzt sein (macht Ihr E-Mail- bzw. Domain-Anbieter). Abmeldelinks und
+        One-Click-Abmeldung fuegt ReviewPilot automatisch hinzu.
+      </p>
       <Feedback state={state} />
       <Button type="submit" disabled={pending}>
         {pending ? 'Speichert …' : 'SMTP speichern'}

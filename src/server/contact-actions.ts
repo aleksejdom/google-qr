@@ -103,6 +103,8 @@ export async function requestConsent(contactId: string): Promise<ActionState> {
     to: contact.email,
     subject: renderTemplate(CONSENT_EMAIL_SUBJECT, vars),
     text: renderTemplate(CONSENT_EMAIL_BODY, vars),
+    fromName: contact.org.name,
+    unsubscribeUrl: appUrl(`/api/opt-out/${contact.optOutToken}`),
   })
   if (!result.ok) return { error: `Versand fehlgeschlagen: ${result.error ?? 'Unbekannter Fehler'}` }
 

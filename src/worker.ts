@@ -35,6 +35,8 @@ async function processRecalls() {
         contact: {
           optedOutAt: null,
           email: { not: null },
+          // Erinnerungen nur an Kontakte mit Einwilligung (DSGVO)
+          consentAt: { not: null },
           // Wer bereits (irgendwo) eine Bewertung abgegeben hat, wird nicht erinnert
           requests: { none: { status: 'COMPLETED' } },
         },
@@ -66,6 +68,8 @@ async function processRecalls() {
         to: request.contact.email!,
         subject: renderTemplate(REMINDER_EMAIL_SUBJECT, vars),
         text: renderTemplate(REMINDER_EMAIL_BODY, vars),
+        fromName: rule.org.name,
+        unsubscribeUrl: appUrl(`/api/opt-out/${request.contact.optOutToken}`),
       })
 
       if (result.ok) {

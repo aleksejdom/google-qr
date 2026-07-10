@@ -1,5 +1,4 @@
-import { prisma } from '@/lib/db'
-import { logAudit } from '@/lib/audit'
+import { optOutByToken } from '@/lib/opt-out'
 
 export default async function OptOutPage({
   params,
@@ -7,24 +6,7 @@ export default async function OptOutPage({
   params: Promise<{ token: string }>
 }) {
   const { token } = await params
-  const contact = await prisma.contact.findUnique({ where: { optOutToken: token } })
-
-  if (contact && !contact.optedOutAt) {
-    await prisma.contact.update({
-      where: { id: contact.id },
-      data: { optedOutAt: new Date() },
-    })
-    await prisma.reviewRequest.updateMany({
-      where: { contactId: contact.id, status: { in: ['PENDING', 'SENT', 'REMINDED'] } },
-      data: { status: 'OPTED_OUT' },
-    })
-    await logAudit({
-      orgId: contact.orgId,
-      action: 'contact.opted_out',
-      entity: 'Contact',
-      entityId: contact.id,
-    })
-  }
+  const contact = await optOutByToken(token)
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-zinc-50 p-6 dark:bg-zinc-950">

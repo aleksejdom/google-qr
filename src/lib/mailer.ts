@@ -42,15 +42,35 @@ export async function getSmtpConfig(orgId: string): Promise<SmtpConfig | null> {
   return null
 }
 
-export async function sendMail(opts: {
-  orgId: string
+type MailMessage = {
   to: string
   subject: string
   text: string
   html?: string
-}): Promise<{ ok: boolean; error?: string }> {
-  const config = await getSmtpConfig(opts.orgId)
-  if (!config) return { ok: false, error: 'Kein SMTP konfiguriert' }
+  /**
+   * Abmelde-URL fuer die List-Unsubscribe-Header (RFC 8058, One-Click).
+   * Gmail/Yahoo verlangen diese Header bei Massen-Versand – ohne sie
+   * landen Kampagnen-Mails deutlich haeufiger im Spam.
+   */
+  unsubscribeUrl?: string
+}
+
+export type Mailer = {
+  send(msg: MailMessage): Promise<{ ok: boolean; error?: string }>
+  close(): void
+}
+
+/**
+ * Mailer mit Verbindungs-Pool fuer den Kampagnen-Versand: eine SMTP-Sitzung
+ * fuer viele Mails (statt Verbindung pro Mail) und gedrosseltes Tempo –
+ * beides wichtig, damit der Provider den Versand nicht als Spam einstuft.
+ */
+export async function createMailer(
+  orgId: string,
+  opts?: { fromName?: string }
+): Promise<Mailer | null> {
+  const config = await getSmtpConfig(orgId)
+  if (!config) return null
 
   const transporter = nodemailer.createTransport({
     host: config.host,
@@ -64,20 +84,60 @@ export async function sendMail(opts: {
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,
     socketTimeout: 20_000,
+    // Pool + Drosselung: max. 5 Mails/Sekunde ueber max. 2 Verbindungen
+    pool: true,
+    maxConnections: 2,
+    rateDelta: 1000,
+    rateLimit: 5,
   })
 
+  // Absender mit Anzeigename ("Firma <adresse>") wirkt vertrauenswuerdiger,
+  // sofern in den Einstellungen nicht schon ein Name hinterlegt ist
+  const from =
+    opts?.fromName && !config.from.includes('<')
+      ? { name: opts.fromName, address: config.from }
+      : config.from
+
+  return {
+    async send(msg) {
+      try {
+        await transporter.sendMail({
+          from,
+          to: msg.to,
+          subject: msg.subject,
+          text: msg.text,
+          // Immer multipart (Text + HTML) senden – reine Auffaelligkeiten
+          // im Format erhoehen den Spam-Score
+          html: msg.html ?? renderEmailHtml(msg.text),
+          headers: msg.unsubscribeUrl
+            ? {
+                'List-Unsubscribe': `<${msg.unsubscribeUrl}>`,
+                'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+              }
+            : undefined,
+        })
+        return { ok: true }
+      } catch (err) {
+        logger.error({ err, to: msg.to }, 'E-Mail-Versand fehlgeschlagen')
+        return { ok: false, error: err instanceof Error ? err.message : 'Unbekannter Fehler' }
+      }
+    },
+    close() {
+      transporter.close()
+    },
+  }
+}
+
+/** Einzelne E-Mail versenden (Verbindung wird danach geschlossen). */
+export async function sendMail(
+  opts: MailMessage & { orgId: string; fromName?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  const mailer = await createMailer(opts.orgId, { fromName: opts.fromName })
+  if (!mailer) return { ok: false, error: 'Kein SMTP konfiguriert' }
   try {
-    await transporter.sendMail({
-      from: config.from,
-      to: opts.to,
-      subject: opts.subject,
-      text: opts.text,
-      html: opts.html,
-    })
-    return { ok: true }
-  } catch (err) {
-    logger.error({ err, to: opts.to }, 'E-Mail-Versand fehlgeschlagen')
-    return { ok: false, error: err instanceof Error ? err.message : 'Unbekannter Fehler' }
+    return await mailer.send(opts)
+  } finally {
+    mailer.close()
   }
 }
 
